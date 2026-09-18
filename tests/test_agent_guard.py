@@ -212,5 +212,62 @@ rules: []
         assert v.risk == RiskLevel.LOW
 
 
+class TestResourceNoneHandling:
+    def test_resource_none_matches_rule(self):
+        p = Policy.from_yaml("""
+name: test-none
+default_action: deny
+rules:
+  - action: allow
+    tool: "get_status"
+    resource: "*"
+""")
+        g = Guard(p)
+        call = ToolCall(tool="get_status", resource=None)
+        v = g.check(call)
+        assert v.allowed is True
+        assert v.rule is not None
+
+    def test_resource_none_denied_when_no_tool_rule(self):
+        p = Policy.from_yaml("""
+name: test-none-deny
+default_action: deny
+rules:
+  - action: allow
+    tool: "fs.read"
+    resource: "*"
+""")
+        g = Guard(p)
+        call = ToolCall(tool="other_tool", resource=None)
+        v = g.check(call)
+        assert v.allowed is False
+        assert "default deny" in v.reason
+
+    def test_resource_empty_string(self):
+        p = Policy.from_yaml("""
+name: test-empty
+default_action: deny
+rules:
+  - action: allow
+    tool: "ping"
+    resource: "*"
+""")
+        g = Guard(p)
+        call = ToolCall(tool="ping", resource="")
+        v = g.check(call)
+        assert v.allowed is True
+
+    def test_network_check_with_none_resource(self):
+        p = Policy.from_yaml("""
+name: test-net-none
+default_action: allow
+rules: []
+""")
+        g = Guard(p)
+        call = ToolCall(tool="http", resource=None)
+        v = g.check(call)
+        assert v.allowed is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

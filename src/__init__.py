@@ -38,7 +38,9 @@ class Rule:
     def matches_tool(self, tool_name: str) -> bool:
         return fnmatch.fnmatch(tool_name, self.tool)
 
-    def matches_resource(self, resource: str) -> bool:
+    def matches_resource(self, resource: str | None) -> bool:
+        if resource is None:
+            return True
         from pathlib import PurePath
         # Normalize: strip leading ./
         res = resource[2:] if resource.startswith("./") else resource
@@ -129,7 +131,7 @@ class Policy:
 @dataclass
 class ToolCall:
     tool: str
-    resource: str = ""
+    resource: str | None = ""
     arguments: dict[str, Any] = field(default_factory=dict)
 
 
@@ -209,7 +211,7 @@ class Guard:
         )
 
     def _check_network(self, call: ToolCall) -> Verdict:
-        resource = call.resource
+        resource = call.resource or ""
         # Extract domain from URL if present
         domain = ""
         if "://" in resource:
