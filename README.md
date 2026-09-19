@@ -59,6 +59,37 @@ agent-guard check .agent-guard.yaml --tool shell --resource "rm -rf /"
 #    risk: medium
 ```
 
+## Python API
+
+```python
+from agent_guard import Policy, Guard, ToolCall
+
+policy = Policy.from_yaml("""
+name: my-agent
+default_action: deny
+max_tool_calls: 50
+rules:
+  - action: allow
+    tool: fs.read
+    resource: "./**/*"
+""")
+
+guard = Guard(policy)
+
+# Evaluate tool call
+verdict = guard.check(ToolCall(tool="fs.read", resource="./src/main.py"))
+print(verdict.allowed)  # True
+
+# Inspect execution metrics and policy limits
+stats = guard.stats()
+print(stats.tool_call_count)  # 1
+print(stats.max_tool_calls)    # 50
+
+# Reset counters between test cases or sessions (supports chaining)
+guard.reset()
+print(guard.stats().tool_call_count)  # 0
+```
+
 ## Policy Templates
 
 Pre-made templates for common scenarios. Copy, customize, and use.

@@ -153,6 +153,31 @@ class Verdict:
     risk: RiskLevel = RiskLevel.LOW
 
 
+@dataclass
+class GuardStats:
+    """Snapshot of Guard runtime execution metrics."""
+    execution_count: int
+    tool_call_count: int
+    max_tool_calls: int | None
+    max_executions: int | None
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "execution_count": self.execution_count,
+            "tool_call_count": self.tool_call_count,
+            "max_tool_calls": self.max_tool_calls,
+            "max_executions": self.max_executions,
+        }
+
 
 class Guard:
     """Evaluate tool calls against a policy."""
@@ -162,6 +187,23 @@ class Guard:
         self.execution_count = 0
         self.tool_call_count = 0
         self._lock = threading.Lock()
+
+    def reset(self) -> "Guard":
+        """Reset execution and tool call counters to zero."""
+        with self._lock:
+            self.execution_count = 0
+            self.tool_call_count = 0
+        return self
+
+    def stats(self) -> GuardStats:
+        """Return a snapshot of current guard metrics."""
+        with self._lock:
+            return GuardStats(
+                execution_count=self.execution_count,
+                tool_call_count=self.tool_call_count,
+                max_tool_calls=self.policy.max_tool_calls,
+                max_executions=self.policy.max_executions,
+            )
 
     def check(self, call: ToolCall) -> Verdict:
         with self._lock:

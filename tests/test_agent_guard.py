@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from django.utils import asyncio
 import pytest
 import asyncio
 
-from agent_guard import Action, Guard, Policy, RiskLevel, Rule, ToolCall
+from agent_guard import Action, Guard, GuardStats, Policy, RiskLevel, Rule, ToolCall
 
 
 SAMPLE_POLICY = """
@@ -289,7 +288,16 @@ class TestAsyncGuard:
         assert verdicts[1].allowed is True
         assert verdicts[2].allowed is False
     @pytest.mark.asyncio
-    async def test_guard_concurrent_checks(self, guard: Guard):
+    async def test_guard_concurrent_checks(self):
+        policy = Policy.from_yaml("""
+name: concurrent-agent
+default_action: deny
+rules:
+  - action: allow
+    tool: fs.read
+    resource: "./**/*"
+""")
+        guard = Guard(policy)
         calls = [
             ToolCall(tool="fs.read", resource="./src/main.py")
             for _ in range(100)
@@ -301,8 +309,9 @@ class TestAsyncGuard:
 
         assert len(verdicts) == 100
         assert all(v.allowed is True for v in verdicts)
+
     @pytest.mark.asyncio
-    async def test_from_file_async(tmp_path):
+    async def test_from_file_async(self, tmp_path: Path):
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(SAMPLE_POLICY)
 
@@ -310,6 +319,84 @@ class TestAsyncGuard:
 
         assert policy.name == "test-agent"
         assert policy.default_action == Action.DENY
+
+
+class TestGuardLifecycleAndStats:
+    """Tests for Guard.reset() and Guard.stats()."""
+
+    def test_reset_zeroes_counters(self, guard: Guard):
+        # Manually alter counters
+        guard.execution_count = 5
+        guard.tool_call_count = 10
+
+        returned = guard.reset()
+        assert returned is guard  # Returns self for chaining
+        assert guard.execution_count == 0
+        assert guard.tool_call_count == 0
+
+    def test_stats_reflects_current_state(self):
+        policy = Policy.from_yaml("""
+name: stats-agent
+default_action: allow
+max_tool_calls: 15
+max_executions: 3
+rules: []
+""")
+        guard = Guard(policy)
+        guard.execution_count = 2
+        guard.check(ToolCall(tool="fs.read", resource="./file.txt"))
+        guard.check(ToolCall(tool="fs.read", resource="./file2.txt"))
+
+        stats = guard.stats()
+        assert isinstance(stats, GuardStats)
+        assert stats.execution_count == 2
+        assert stats.tool_call_count == 2
+        assert stats.max_tool_calls == 15
+        assert stats.max_executions == 3
+
+        # Test dictionary-like access
+        assert stats["execution_count"] == 2
+        assert stats["tool_call_count"] == 2
+        assert stats.get("max_tool_calls") == 15
+        assert stats.to_dict() == {
+            "execution_count": 2,
+            "tool_call_count": 2,
+            "max_tool_calls": 15,
+            "max_executions": 3,
+        }
+
+    def test_reset_restores_initial_behavior_after_check(self):
+        policy = Policy.from_yaml("""
+name: limit-test
+default_action: allow
+max_tool_calls: 2
+rules: []
+""")
+        guard = Guard(policy)
+        assert guard.check(ToolCall(tool="cmd", resource="1")).allowed is True
+        assert guard.check(ToolCall(tool="cmd", resource="2")).allowed is True
+
+        # Third call exceeds max_tool_calls
+        exceeded = guard.check(ToolCall(tool="cmd", resource="3"))
+        assert exceeded.allowed is False
+        assert "max_tool_calls exceeded" in exceeded.reason
+        assert guard.stats().tool_call_count == 3
+
+        # Reset zeroes tool_call_count and restores initial behavior
+        guard.reset()
+        assert guard.stats().tool_call_count == 0
+        v1 = guard.check(ToolCall(tool="cmd", resource="1"))
+        assert v1.allowed is True
+        assert guard.stats().tool_call_count == 1
+
+    def test_reset_chaining(self):
+        policy = Policy(name="chain", description="chain test", default_action=Action.ALLOW)
+        guard = Guard(policy)
+        guard.tool_call_count = 99
+        v = guard.reset().check(ToolCall(tool="ping", resource="localhost"))
+        assert v.allowed is True
+        assert guard.tool_call_count == 1
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
