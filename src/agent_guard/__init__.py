@@ -6,8 +6,10 @@ Prevents agents from exceeding defined scopes (network, filesystem, commands).
 
 from __future__ import annotations
 
+import asyncio
 import re
 import fnmatch
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -147,6 +149,10 @@ class Verdict:
     reason: str
     risk: RiskLevel = RiskLevel.LOW
 
+@classmethod
+async def from_file_async(cls, path: str | Path) -> "Policy":
+    return await asyncio.to_thread(cls.from_file, path)
+
 
 class Guard:
     """Evaluate tool calls against a policy."""
@@ -155,12 +161,15 @@ class Guard:
         self.policy = policy
         self.execution_count = 0
         self.tool_call_count = 0
+        self._lock = threading.Lock()
 
     def check(self, call: ToolCall) -> Verdict:
-        self.tool_call_count += 1
+        with self._lock:
+            self.tool_call_count += 1
+            current_count = self.tool_call_count
 
         # Global limits
-        if self.policy.max_tool_calls and self.tool_call_count > self.policy.max_tool_calls:
+        if self.policy.max_tool_calls and current_count > self.policy.max_tool_calls:
             return Verdict(
                 allowed=False,
                 rule=None,
@@ -182,7 +191,7 @@ class Guard:
         if call.tool in ("shell", "bash"):
             dangerous = [";", "|", "&", "$", "`", ">", "<", "\n", "\r", "#", "&&", "||"]
             for ch in dangerous:
-                if ch in call.resource:
+                if ch in (call.resource or ""):
                     return Verdict(
                         allowed=False,
                         rule=None,
@@ -226,6 +235,17 @@ class Guard:
             reason="default deny (no matching rule)",
             risk=RiskLevel.LOW,
         )
+
+    async def check_async(self, call: ToolCall) -> Verdict:
+        # Async version of check().
+        
+        return await asyncio.to_thread(self.check, call)
+
+    async def check_batch_async(self, calls: list[ToolCall]) -> list[Verdict]:
+        # Check multiple calls concurrently.
+        
+        tasks = [self.check_async(call) for call in calls]
+        return await asyncio.gather(*tasks)
 
     def _check_network(self, call: ToolCall) -> Verdict:
         resource = call.resource or ""

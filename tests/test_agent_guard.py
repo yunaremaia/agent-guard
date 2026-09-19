@@ -268,6 +268,25 @@ rules: []
         v = g.check(call)
         assert v.allowed is True
 
+class TestAsyncGuard:
+    @pytest.mark.asyncio
+    async def test_check_async(self, guard: Guard):
+        call = ToolCall(tool="fs.read", resource="./src/main.py")
+        v = await guard.check_async(call)
+        assert v.allowed is True
+
+    @pytest.mark.asyncio
+    async def test_check_batch_async(self, guard: Guard):
+        calls = [
+            ToolCall(tool="fs.read", resource="./src/main.py"),
+            ToolCall(tool="shell", resource="ls -la"),
+            ToolCall(tool="fs.write", resource="/etc/passwd"),
+        ]
+        verdicts = await guard.check_batch_async(calls)
+        assert verdicts[0].allowed is True
+        assert verdicts[1].allowed is True
+        assert verdicts[2].allowed is False
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
