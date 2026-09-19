@@ -133,6 +133,9 @@ class Policy:
     @classmethod
     def from_file(cls, path: str | Path) -> "Policy":
         return cls.from_yaml(Path(path).read_text())
+    @classmethod
+    async def from_file_async(cls, path: str | Path) -> "Policy":
+        return await asyncio.to_thread(cls.from_file, path)
 
 
 @dataclass
@@ -149,9 +152,6 @@ class Verdict:
     reason: str
     risk: RiskLevel = RiskLevel.LOW
 
-@classmethod
-async def from_file_async(cls, path: str | Path) -> "Policy":
-    return await asyncio.to_thread(cls.from_file, path)
 
 
 class Guard:
