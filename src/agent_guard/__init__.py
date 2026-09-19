@@ -6,14 +6,20 @@ Prevents agents from exceeding defined scopes (network, filesystem, commands).
 
 from __future__ import annotations
 
-import re
 import fnmatch
+import re
 from dataclasses import dataclass, field
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+try:
+    __version__ = version("agent-guard")
+except PackageNotFoundError:
+    __version__ = "0.4.0"
 
 
 class Action(Enum):
@@ -42,6 +48,7 @@ class Rule:
         if resource is None:
             return True
         from pathlib import PurePath
+
         # Normalize: strip leading ./
         res = resource[2:] if resource.startswith("./") else resource
         pat = self.resource[2:] if self.resource.startswith("./") else self.resource
@@ -79,10 +86,10 @@ class Rule:
         # Try regex match for patterns with regex-specific chars
         # SECURITY: Limit pattern length and complexity to prevent ReDoS
         try:
-            if any(c in pat for c in ['^', '$', '|', '(', ')', '+', '?', '{', '}']):
+            if any(c in pat for c in ["^", "$", "|", "(", ")", "+", "?", "{", "}"]):
                 if len(pat) > 100:
                     return False
-                if re.search(r'\([^)]*\)[*+?]', pat) or re.search(r'[*+?]\s*[*+?]', pat):
+                if re.search(r"\([^)]*\)[*+?]", pat) or re.search(r"[*+?]\s*[*+?]", pat):
                     return False
                 return bool(re.fullmatch(pat, res))
         except re.error:

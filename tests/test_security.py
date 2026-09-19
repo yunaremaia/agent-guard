@@ -1,6 +1,8 @@
 """Tests for agent-guard security fixes."""
+
 import sys
-sys.path.insert(0, 'src')
+
+sys.path.insert(0, "src")
 
 import pytest
 from agent_guard import Guard, Policy, ToolCall, Action, RiskLevel
