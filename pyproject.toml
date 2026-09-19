@@ -21,7 +21,7 @@ dependencies = ["pyyaml>=6.0", "click>=8.0"]
 dev = ["pytest>=7.0", "ruff>=0.4"]
 
 [project.scripts]
-agent-guard = "src.main:cli"
+agent-guard = "agent_guard.main:cli"
 
 [build-system]
 requires = ["hatchling"]

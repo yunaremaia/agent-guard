@@ -8,11 +8,17 @@ from pathlib import Path
 
 import click
 
-from . import Guard, Policy, ToolCall
+from . import Guard, Policy, ToolCall, __version__
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="agent-guard")
+@click.version_option(
+    __version__,
+    "-v",
+    "--version",
+    package_name="agent-guard",
+    prog_name="Agent Guard",
+)
 def cli():
     """Policy-as-code for AI agent permissions."""
 
