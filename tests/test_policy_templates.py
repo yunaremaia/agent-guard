@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src import Action, Policy
+from agent_guard import Action, Policy
 
 
 POLICY_DIR = Path(__file__).parents[1] / "examples" / "policies"

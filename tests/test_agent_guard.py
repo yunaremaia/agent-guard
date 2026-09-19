@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src import Action, Guard, Policy, RiskLevel, Rule, ToolCall
+from agent_guard import Action, Guard, Policy, RiskLevel, Rule, ToolCall
 
 
 SAMPLE_POLICY = """

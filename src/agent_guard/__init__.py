@@ -77,8 +77,13 @@ class Rule:
             return True
 
         # Try regex match for patterns with regex-specific chars
+        # SECURITY: Limit pattern length and complexity to prevent ReDoS
         try:
             if any(c in pat for c in ['^', '$', '|', '(', ')', '+', '?', '{', '}']):
+                if len(pat) > 100:
+                    return False
+                if re.search(r'\([^)]*\)[*+?]', pat) or re.search(r'[*+?]\s*[*+?]', pat):
+                    return False
                 return bool(re.fullmatch(pat, res))
         except re.error:
             pass
@@ -172,6 +177,18 @@ class Guard:
                     reason=f"tool '{call.tool}' is blocked",
                     risk=RiskLevel.MEDIUM,
                 )
+
+        # SECURITY: Sanitize shell resource to prevent command injection
+        if call.tool in ("shell", "bash"):
+            dangerous = [";", "|", "&", "$", "`", ">", "<", "\n", "\r", "#", "&&", "||"]
+            for ch in dangerous:
+                if ch in call.resource:
+                    return Verdict(
+                        allowed=False,
+                        rule=None,
+                        reason=f"shell resource contains injection character '{ch}'",
+                        risk=RiskLevel.CRITICAL,
+                    )
 
         # Domain checks for network tools
         if call.tool in ("browser", "http", "fetch", "request"):
