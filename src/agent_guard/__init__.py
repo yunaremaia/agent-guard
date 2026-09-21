@@ -42,7 +42,7 @@ class Rule:
 
     def matches_resource(self, resource: str | None) -> bool:
         if resource is None:
-            return True
+            return self.resource in ("*", "./**/*")
         from pathlib import PurePath
         # Normalize: strip leading ./
         res = resource[2:] if resource.startswith("./") else resource
@@ -220,14 +220,6 @@ class Guard:
                 reason=f"max_tool_calls exceeded ({self.policy.max_tool_calls})",
                 risk=RiskLevel.HIGH,
             )
-        if self.policy.max_executions and self.execution_count > self.policy.max_executions:
-            return Verdict(
-                allowed=False,
-                rule=None,
-                reason=f"max_executions exceeded ({self.policy.max_executions})",
-                risk=RiskLevel.HIGH,
-            )
-
         if self.policy.max_executions and current_exec > self.policy.max_executions:
             return Verdict(
                 allowed=False,
