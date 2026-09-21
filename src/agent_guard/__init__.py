@@ -206,6 +206,17 @@ class Guard:
             )
 
     def check(self, call: ToolCall) -> Verdict:
+        if not isinstance(call.tool, str) or not call.tool:
+            raise ValueError(f"ToolCall.tool must be a non-empty string, got {call.tool!r}")
+        if call.resource is not None and not isinstance(call.resource, str):
+            raise TypeError(
+                f"ToolCall.resource must be None or a string, got {call.resource!r}"
+            )
+        if not isinstance(call.arguments, dict):
+            raise TypeError(
+                f"ToolCall.arguments must be a dict, got {type(call.arguments).__name__}"
+            )
+
         with self._lock:
             self.tool_call_count += 1
             self.execution_count += 1

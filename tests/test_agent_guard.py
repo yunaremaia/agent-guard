@@ -82,6 +82,29 @@ class TestAllowRules:
         assert v.allowed is True
 
 
+class TestToolCallValidation:
+    @pytest.mark.parametrize("tool", ["", None, 123])
+    def test_tool_must_be_non_empty_string(self, guard: Guard, tool):
+        call = ToolCall(tool=tool, resource="x")
+
+        with pytest.raises(ValueError, match="ToolCall.tool must be a non-empty string"):
+            guard.check(call)
+
+    @pytest.mark.parametrize("resource", [123, []])
+    def test_resource_must_be_none_or_string(self, guard: Guard, resource):
+        call = ToolCall(tool="example", resource=resource)
+
+        with pytest.raises(TypeError, match="ToolCall.resource must be None or a string"):
+            guard.check(call)
+
+    @pytest.mark.parametrize("arguments", [None, []])
+    def test_arguments_must_be_dict(self, guard: Guard, arguments):
+        call = ToolCall(tool="example", arguments=arguments)
+
+        with pytest.raises(TypeError, match="ToolCall.arguments must be a dict"):
+            guard.check(call)
+
+
 class TestDenyRules:
     def test_deny_write_etc(self, guard: Guard):
         call = ToolCall(tool="fs.write", resource="/etc/passwd")
