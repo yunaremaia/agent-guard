@@ -90,6 +90,109 @@ guard.reset()
 print(guard.stats().tool_call_count)  # 0
 ```
 
+## Async API
+
+`agent-guard` provides first-class async support for use in async agent frameworks
+(LangChain, AutoGen, CrewAI, or any `asyncio`-based loop).
+
+### `check_async` — evaluate a single tool call
+
+```python
+import asyncio
+from agent_guard import Policy, ToolCall, check_async
+
+policy = Policy.from_file(".agent-guard.yaml")
+
+async def main():
+    decision = await check_async(policy, ToolCall(tool="fs.read", resource="./src/main.py"))
+    print(decision.allowed)   # True
+    print(decision.reason)    # "allowed by rule: Read project files"
+    print(decision.risk)      # RiskLevel.LOW
+
+asyncio.run(main())
+```
+
+### `check_batch_async` — evaluate multiple tool calls concurrently
+
+```python
+from agent_guard import check_batch_async
+
+async def main():
+    calls = [
+        ToolCall(tool="fs.read", resource="./src/main.py"),
+        ToolCall(tool="shell", resource="rm -rf /"),
+    ]
+    decisions = await check_batch_async(policy, calls)
+    for call, decision in zip(calls, decisions):
+        print(f"{call.tool}: {'✅' if decision.allowed else '❌'} {decision.reason}")
+
+asyncio.run(main())
+```
+
+### Raising on denied calls (`PolicyViolation`)
+
+Pass `raise_on_deny=True` to raise a `PolicyViolation` exception instead of
+returning a denied `PolicyDecision`:
+
+```python
+from agent_guard import check_async, PolicyViolation
+
+async def agent_step(policy, tool_call):
+    try:
+        decision = await check_async(policy, tool_call, raise_on_deny=True)
+        # Proceed — decision.allowed is guaranteed True here
+        execute_tool(tool_call)
+    except PolicyViolation as exc:
+        print(f"Blocked: {exc.decision.reason}")
+```
+
+### `Guard.check_async` / `Guard.check_batch_async`
+
+If you need stateful tracking (execution counts, tool-call limits), use the
+`Guard` instance methods directly:
+
+```python
+from agent_guard import Guard
+
+guard = Guard(policy)
+
+verdict = await guard.check_async(ToolCall(tool="fs.read", resource="./x.py"))
+print(verdict.allowed)             # True
+print(guard.stats().tool_call_count)  # 1
+
+verdicts = await guard.check_batch_async([
+    ToolCall(tool="fs.read", resource="./a.py"),
+    ToolCall(tool="fs.read", resource="./b.py"),
+])
+print(guard.stats().tool_call_count)  # 3
+```
+
+### Async agent loop example
+
+```python
+import asyncio
+from agent_guard import Policy, Guard, ToolCall
+
+async def run_agent():
+    policy = Policy.from_file(".agent-guard.yaml")
+    guard = Guard(policy)
+
+    tool_calls = [
+        ToolCall(tool="fs.read", resource="./data.csv"),
+        ToolCall(tool="http", resource="https://api.github.com/repos"),
+        ToolCall(tool="shell", resource="rm -rf /"),
+    ]
+
+    for call in tool_calls:
+        verdict = await guard.check_async(call)
+        if verdict.allowed:
+            print(f"✅ Executing {call.tool} on {call.resource}")
+        else:
+            print(f"❌ Blocked: {verdict.reason} (risk: {verdict.risk.value})")
+
+asyncio.run(run_agent())
+```
+
 ## Policy Templates
 
 Pre-made templates for common scenarios. Copy, customize, and use.
@@ -608,7 +711,10 @@ Or use the multi-agent template (see Policy Templates section).
 Import classes directly from the package:
 
 ```python
-from agent_guard import Guard, Policy, Rule, ToolCall, Action, RiskLevel
+from agent_guard import (
+    Guard, Policy, Rule, ToolCall, Action, RiskLevel,
+    PolicyDecision, PolicyViolation, check_async, check_batch_async,
+)
 
 # 1. Load or construct a Policy
 policy = Policy.from_file(".agent-guard.yaml")
@@ -642,10 +748,15 @@ else:
 - `Policy`:
   - `Policy.from_file(path: str | Path) -> Policy`: Load policy from YAML file.
   - `Policy.from_yaml(text: str) -> Policy`: Parse policy from YAML string.
+  - `Policy.from_file_async(path: str | Path) -> Policy`: Async version of `from_file`.
   - Attributes: `name`, `description`, `default_action` (`Action`), `rules` (`list[Rule]`), `max_tool_calls` (`int | None`), `max_executions` (`int | None`), `blocked_tools` (`list[str]`), `allowed_domains` (`list[str]`), `blocked_domains` (`list[str]`).
 - `Guard`:
   - `Guard(policy: Policy)`: Initializes runtime guard with execution and call counters.
   - `guard.check(call: ToolCall) -> Verdict`: Evaluates tool call against limits, blocked tools, domain rules, and ordered policy rules.
+  - `guard.check_async(call: ToolCall) -> Verdict`: Async version of `check()`. Runs the evaluation in a thread via `asyncio.to_thread`.
+  - `guard.check_batch_async(calls: list[ToolCall]) -> list[Verdict]`: Evaluates multiple tool calls concurrently.
+  - `guard.stats() -> GuardStats`: Returns current execution metrics.
+  - `guard.reset() -> Guard`: Resets counters (supports chaining).
 - `ToolCall`:
   - `ToolCall(tool: str, resource: str = "", arguments: dict[str, Any] = ...)`: Represents an agent action.
 - `Verdict`:
@@ -653,8 +764,23 @@ else:
   - `rule: Rule | None`: Matched rule if applicable, or None if fell through to default/limits.
   - `reason: str`: Human-readable justification.
   - `risk: RiskLevel`: Risk category (`RiskLevel.LOW`, `RiskLevel.MEDIUM`, `RiskLevel.HIGH`, `RiskLevel.CRITICAL`).
+- `PolicyDecision`:
+  - `allowed: bool`: Whether the action is permitted.
+  - `denied: bool`: Convenience property — `True` when the call was denied.
+  - `reason: str`: Human-readable justification.
+  - `risk: RiskLevel`: Risk category.
+  - `rule: Rule | None`: Matched rule if applicable.
+  - `PolicyDecision.from_verdict(verdict: Verdict) -> PolicyDecision`: Create from a `Verdict`.
+- `PolicyViolation(Exception)`:
+  - Raised when a tool call is denied with `raise_on_deny=True`.
+  - `decision: PolicyDecision`: The decision that triggered the violation.
 - `Rule`:
   - `Rule(action: Action, resource: str, tool: str, description: str = "")`: Rule definition with glob/regex matching.
+
+### Module-Level Async Functions
+
+- `check_async(policy, tool_call, context=None, *, raise_on_deny=False) -> PolicyDecision`: Evaluate a single tool call asynchronously.
+- `check_batch_async(policy, tool_calls, context=None, *, raise_on_deny=False) -> list[PolicyDecision]`: Evaluate multiple tool calls concurrently.
 
 ---
 

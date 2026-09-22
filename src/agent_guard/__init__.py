@@ -445,3 +445,129 @@ class Guard:
             reason="domain check passed, no matching rule — using default",
             risk=RiskLevel.MEDIUM,
         )
+
+
+@dataclass
+class PolicyDecision:
+    """Result of an async policy evaluation.
+
+    Wraps the internal Verdict with a user-friendly interface for async callers.
+    """
+
+    allowed: bool
+    reason: str
+    risk: RiskLevel
+    rule: Rule | None = None
+
+    @property
+    def denied(self) -> bool:
+        """True when the tool call was denied."""
+        return not self.allowed
+
+    @classmethod
+    def from_verdict(cls, verdict: Verdict) -> "PolicyDecision":
+        """Create a PolicyDecision from an internal Verdict."""
+        return cls(
+            allowed=verdict.allowed,
+            reason=verdict.reason,
+            risk=verdict.risk,
+            rule=verdict.rule,
+        )
+
+
+class PolicyViolation(Exception):
+    """Raised when a tool call is denied by the policy.
+
+    Attributes:
+        decision: The PolicyDecision that triggered the violation.
+    """
+
+    def __init__(self, decision: PolicyDecision) -> None:
+        self.decision = decision
+        super().__init__(
+            f"Policy violation: {decision.reason} (risk={decision.risk.value})"
+        )
+
+
+async def check_async(
+    policy: Policy,
+    tool_call: ToolCall,
+    context: dict[str, Any] | None = None,
+    *,
+    raise_on_deny: bool = False,
+) -> PolicyDecision:
+    """Asynchronously evaluate a single tool call against a policy.
+
+    Creates a one-shot Guard and runs the check in a thread so the
+    calling event loop is never blocked.
+
+    Args:
+        policy: The Policy to enforce.
+        tool_call: The ToolCall to evaluate.
+        context: Optional context dict (reserved for future use).
+        raise_on_deny: If True, raise PolicyViolation instead of returning
+            a denied PolicyDecision.
+
+    Returns:
+        A PolicyDecision indicating whether the call is allowed.
+
+    Raises:
+        PolicyViolation: When *raise_on_deny* is True and the call is denied.
+    """
+    guard = Guard(policy)
+    verdict = await asyncio.to_thread(guard.check, tool_call)
+    decision = PolicyDecision.from_verdict(verdict)
+    if raise_on_deny and decision.denied:
+        raise PolicyViolation(decision)
+    return decision
+
+
+async def check_batch_async(
+    policy: Policy,
+    tool_calls: list[ToolCall],
+    context: dict[str, Any] | None = None,
+    *,
+    raise_on_deny: bool = False,
+) -> list[PolicyDecision]:
+    """Asynchronously evaluate multiple tool calls against a policy.
+
+    Each call is checked concurrently via asyncio.gather.
+
+    Args:
+        policy: The Policy to enforce.
+        tool_calls: List of ToolCalls to evaluate.
+        context: Optional context dict (reserved for future use).
+        raise_on_deny: If True, raise PolicyViolation on the first
+            denied call encountered.
+
+    Returns:
+        A list of PolicyDecision objects, one per tool call.
+
+    Raises:
+        PolicyViolation: When *raise_on_deny* is True and any call is denied.
+    """
+    guard = Guard(policy)
+    tasks = [asyncio.to_thread(guard.check, call) for call in tool_calls]
+    verdicts = await asyncio.gather(*tasks)
+    decisions = [PolicyDecision.from_verdict(v) for v in verdicts]
+    if raise_on_deny:
+        for decision in decisions:
+            if decision.denied:
+                raise PolicyViolation(decision)
+    return decisions
+
+
+__all__ = [
+    "Action",
+    "Guard",
+    "GuardStats",
+    "Policy",
+    "PolicyDecision",
+    "PolicyViolation",
+    "RiskLevel",
+    "Rule",
+    "ToolCall",
+    "Verdict",
+    "check_async",
+    "check_batch_async",
+]
