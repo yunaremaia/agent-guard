@@ -86,7 +86,11 @@ class Rule:
             if any(c in pat for c in ['^', '$', '|', '(', ')', '+', '?', '{', '}']):
                 if len(pat) > 100:
                     return False
-                if re.search(r'\([^)]*\)[*+?]', pat) or re.search(r'[*+?]\s*[*+?]', pat):
+                # Reject nested quantifiers: (expr)*+? where expr itself contains a quantifier
+                if re.search(r'\([^)]*[*+?][^)]*\)[*+?]', pat):
+                    return False
+                # Reject unbounded repetition on character classes: [a-z]{100,}
+                if re.search(r'\[[^\]]+\]\s*\{\d+,}', pat):
                     return False
                 return bool(re.fullmatch(pat, res))
         except re.error:
