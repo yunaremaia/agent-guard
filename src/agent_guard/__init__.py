@@ -293,21 +293,15 @@ class Guard:
             )
 
     def check(self, call: ToolCall) -> Verdict:
-        # Validate ToolCall fields
+        # Validate inputs up front so invalid calls raise a clear ValueError
+        # instead of a cryptic TypeError deep in fnmatch or attribute access.
         if not isinstance(call.tool, str) or not call.tool:
-            return Verdict(
-                allowed=False,
-                rule=None,
-                reason="invalid tool: must be a non-empty string",
-                risk=RiskLevel.HIGH,
-            )
+            raise ValueError("tool must be a non-empty string")
+        if call.resource is not None and not isinstance(call.resource, str):
+            raise ValueError("resource must be None or a string")
         if not isinstance(call.arguments, dict):
-            return Verdict(
-                allowed=False,
-                rule=None,
-                reason="invalid arguments: must be a dict",
-                risk=RiskLevel.HIGH,
-            )
+            # issue #137 specifies ValueError; TRY004 would prefer TypeError.
+            raise ValueError("arguments must be a dict")  # noqa: TRY004
 
         with self._lock:
             self.tool_call_count += 1

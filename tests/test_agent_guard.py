@@ -412,5 +412,42 @@ rules: []
         assert guard.tool_call_count == 1
 
 
+class TestInvalidToolCallValidation:
+    """Invalid ToolCall fields raise a clear ValueError instead of a
+    cryptic TypeError or silent acceptance (#137)."""
+
+    @pytest.mark.parametrize("tool", ["", None, 123, b"tool", ["x"]])
+    def test_invalid_tool(self, guard: Guard, tool):
+        with pytest.raises(ValueError, match="tool must be a non-empty string"):
+            guard.check(ToolCall(tool=tool, resource="x"))
+
+    @pytest.mark.parametrize("resource", [123, ["a"], b"x", {}, 3.14])
+    def test_invalid_resource(self, guard: Guard, resource):
+        with pytest.raises(ValueError, match="resource must be None or a string"):
+            guard.check(ToolCall(tool="shell", resource=resource))
+
+    @pytest.mark.parametrize("arguments", ["not-dict", [1, 2], 42, None])
+    def test_invalid_arguments(self, guard: Guard, arguments):
+        with pytest.raises(ValueError, match="arguments must be a dict"):
+            guard.check(ToolCall(tool="fs.read", resource="x", arguments=arguments))
+
+    def test_valid_calls_still_work(self, guard: Guard):
+        assert guard.check(ToolCall(tool="fs.read", resource="./src/main.py")).allowed is True
+        assert guard.check(ToolCall(tool="shell", resource="ls -la")).allowed is True
+        assert (
+            guard.check(ToolCall(tool="http", resource="https://api.github.com/x")).allowed is True
+        )
+        # resource=None stays valid; unmatched tool falls through to default deny.
+        assert (
+            guard.check(ToolCall(tool="get_status", resource=None, arguments={})).allowed is False
+        )
+
+    def test_invalid_call_does_not_consume_budget(self, guard: Guard):
+        with pytest.raises(ValueError):
+            guard.check(ToolCall(tool="", resource="x"))
+        assert guard.tool_call_count == 0
+        assert guard.execution_count == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

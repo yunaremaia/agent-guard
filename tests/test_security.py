@@ -72,34 +72,30 @@ def test_shell_wildcard_allowed() -> None:
 
 
 def test_invalid_tool_none() -> None:
-    """ToolCall with tool=None should be rejected (issue #137)."""
+    """ToolCall with tool=None should raise ValueError (issue #137)."""
     policy = Policy(name="t", description="t", default_action=Action.ALLOW, rules=[])
     guard = Guard(policy)
     call = ToolCall(tool=None, resource="foo")
-    verdict = guard.check(call)
-    assert not verdict.allowed
-    assert "invalid tool" in verdict.reason
-    assert verdict.risk == RiskLevel.HIGH
+    with pytest.raises(ValueError, match="tool must be a non-empty string"):
+        guard.check(call)
 
 
 def test_invalid_tool_empty() -> None:
-    """ToolCall with empty tool string should be rejected (issue #137)."""
+    """ToolCall with empty tool string should raise ValueError (issue #137)."""
     policy = Policy(name="t", description="t", default_action=Action.ALLOW, rules=[])
     guard = Guard(policy)
     call = ToolCall(tool="", resource="foo")
-    verdict = guard.check(call)
-    assert not verdict.allowed
-    assert "invalid tool" in verdict.reason
+    with pytest.raises(ValueError, match="tool must be a non-empty string"):
+        guard.check(call)
 
 
 def test_invalid_arguments_not_dict() -> None:
-    """ToolCall with non-dict arguments should be rejected (issue #137)."""
+    """ToolCall with non-dict arguments should raise ValueError (issue #137)."""
     policy = Policy(name="t", description="t", default_action=Action.ALLOW, rules=[])
     guard = Guard(policy)
     call = ToolCall(tool="fs.read", arguments="not a dict")  # type: ignore[arg-type]
-    verdict = guard.check(call)
-    assert not verdict.allowed
-    assert "invalid arguments" in verdict.reason
+    with pytest.raises(ValueError, match="arguments must be a dict"):
+        guard.check(call)
 
 
 def test_policy_from_yaml_unknown_fields() -> None:
