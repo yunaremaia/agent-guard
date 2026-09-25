@@ -37,7 +37,9 @@ class Rule:
     tool: str  # tool name pattern (e.g., "browser", "shell", "fs.*")
     description: str = ""
 
-    def matches_tool(self, tool_name: str) -> bool:
+    def matches_tool(self, tool_name: str | None) -> bool:
+        if tool_name is None:
+            return False
         return fnmatch.fnmatch(tool_name, self.tool)
 
     def matches_resource(self, resource: str | None) -> bool:
@@ -84,7 +86,11 @@ class Rule:
             if any(c in pat for c in ['^', '$', '|', '(', ')', '+', '?', '{', '}']):
                 if len(pat) > 100:
                     return False
-                if re.search(r'\([^)]*\)[*+?]', pat) or re.search(r'[*+?]\s*[*+?]', pat):
+                # Reject nested quantifiers: (expr)*+? where expr itself contains a quantifier
+                if re.search(r'\([^)]*[*+?][^)]*\)[*+?]', pat):
+                    return False
+                # Reject unbounded repetition on character classes: [a-z]{100,}
+                if re.search(r'\[[^\]]+\]\s*\{\d+,}', pat):
                     return False
                 return bool(re.fullmatch(pat, res))
         except re.error:
@@ -108,26 +114,107 @@ class Policy:
     @classmethod
     def from_yaml(cls, text: str) -> "Policy":
         data = yaml.safe_load(text)
+        if not isinstance(data, dict):
+            raise ValueError("Policy YAML must be a mapping")
+
+        # Validate known fields and detect unknown ones
+        known_fields = {
+            "name", "description", "default_action", "rules",
+            "max_executions", "max_tool_calls", "blocked_tools",
+            "allowed_domains", "blocked_domains",
+        }
+        unknown = set(data.keys()) - known_fields
+        if unknown:
+            import warnings
+            warnings.warn(
+                f"Policy contains unknown fields: {sorted(unknown)}. "
+                f"These will be ignored.",
+                stacklevel=2,
+            )
+
+        # Validate required field
+        if "name" not in data:
+            raise ValueError("Policy must have a 'name' field")
+
+        # Validate and coerce field types
+        name = data["name"]
+        if not isinstance(name, str) or not name:
+            raise ValueError("Policy 'name' must be a non-empty string")
+
+        description = data.get("description", "")
+        if not isinstance(description, str):
+            raise ValueError("Policy 'description' must be a string")
+
+        default_action_raw = data.get("default_action", "deny")
+        if not isinstance(default_action_raw, str):
+            raise ValueError("Policy 'default_action' must be a string")
+        try:
+            default_action = Action(default_action_raw)
+        except ValueError:
+            raise ValueError(
+                f"Policy 'default_action' must be 'allow' or 'deny', got '{default_action_raw}'"
+            )
+
         rules = []
-        for r in data.get("rules", []):
+        for i, r in enumerate(data.get("rules", [])):
+            if not isinstance(r, dict):
+                raise ValueError(f"Rule {i} must be a mapping")
+            action_raw = r.get("action", "allow")
+            if not isinstance(action_raw, str):
+                raise ValueError(f"Rule {i}: 'action' must be a string")
+            try:
+                action = Action(action_raw)
+            except ValueError:
+                raise ValueError(
+                    f"Rule {i}: 'action' must be 'allow' or 'deny', got '{action_raw}'"
+                )
+            resource = r.get("resource", "*")
+            tool = r.get("tool", "*")
+            if not isinstance(resource, str):
+                raise ValueError(f"Rule {i}: 'resource' must be a string")
+            if not isinstance(tool, str):
+                raise ValueError(f"Rule {i}: 'tool' must be a string")
             rules.append(
                 Rule(
-                    action=Action(r["action"]),
-                    resource=r.get("resource", "*"),
-                    tool=r.get("tool", "*"),
-                    description=r.get("description", ""),
+                    action=action,
+                    resource=resource,
+                    tool=tool,
+                    description=r.get("description", "") or "",
                 )
             )
+
+        def _coerce_int_or_none(val, field_name: str):
+            if val is None:
+                return None
+            if isinstance(val, int) and not isinstance(val, bool):
+                return val
+            raise ValueError(f"Policy '{field_name}' must be an integer or null, got {type(val).__name__}")
+
+        max_executions = _coerce_int_or_none(data.get("max_executions"), "max_executions")
+        max_tool_calls = _coerce_int_or_none(data.get("max_tool_calls"), "max_tool_calls")
+
+        blocked_tools = data.get("blocked_tools", [])
+        if not isinstance(blocked_tools, list) or not all(isinstance(t, str) for t in blocked_tools):
+            raise ValueError("Policy 'blocked_tools' must be a list of strings")
+
+        allowed_domains = data.get("allowed_domains", [])
+        if not isinstance(allowed_domains, list) or not all(isinstance(d, str) for d in allowed_domains):
+            raise ValueError("Policy 'allowed_domains' must be a list of strings")
+
+        blocked_domains = data.get("blocked_domains", [])
+        if not isinstance(blocked_domains, list) or not all(isinstance(d, str) for d in blocked_domains):
+            raise ValueError("Policy 'blocked_domains' must be a list of strings")
+
         return cls(
-            name=data["name"],
-            description=data.get("description", ""),
-            default_action=Action(data.get("default_action", "deny")),
+            name=name,
+            description=description,
+            default_action=default_action,
             rules=rules,
-            max_executions=data.get("max_executions"),
-            max_tool_calls=data.get("max_tool_calls"),
-            blocked_tools=data.get("blocked_tools", []),
-            allowed_domains=data.get("allowed_domains", []),
-            blocked_domains=data.get("blocked_domains", []),
+            max_executions=max_executions,
+            max_tool_calls=max_tool_calls,
+            blocked_tools=blocked_tools,
+            allowed_domains=allowed_domains,
+            blocked_domains=blocked_domains,
         )
 
     @classmethod
@@ -140,7 +227,7 @@ class Policy:
 
 @dataclass
 class ToolCall:
-    tool: str
+    tool: str | None = None
     resource: str | None = ""
     arguments: dict[str, Any] = field(default_factory=dict)
 
@@ -206,6 +293,22 @@ class Guard:
             )
 
     def check(self, call: ToolCall) -> Verdict:
+        # Validate ToolCall fields
+        if not isinstance(call.tool, str) or not call.tool:
+            return Verdict(
+                allowed=False,
+                rule=None,
+                reason="invalid tool: must be a non-empty string",
+                risk=RiskLevel.HIGH,
+            )
+        if not isinstance(call.arguments, dict):
+            return Verdict(
+                allowed=False,
+                rule=None,
+                reason="invalid arguments: must be a dict",
+                risk=RiskLevel.HIGH,
+            )
+
         with self._lock:
             self.tool_call_count += 1
             self.execution_count += 1
