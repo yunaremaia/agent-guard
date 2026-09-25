@@ -12,10 +12,32 @@ import fnmatch
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 import yaml
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize a path for cross-platform matching.
+
+    - Converts Windows backslashes to forward slashes.
+    - Collapses consecutive slashes into one.
+    - Strips a single leading ``./``.
+    - Removes a single trailing slash (for directory patterns).
+    """
+    # Windows backslash → forward slash
+    p = path.replace("\\", "/")
+    # Collapse double (or more) slashes
+    while "//" in p:
+        p = p.replace("//", "/")
+    # Strip leading ./
+    if p.startswith("./"):
+        p = p[2:]
+    # Remove a single trailing slash if present
+    if p.endswith("/") and len(p) > 1:
+        p = p[:-1]
+    return p
 
 
 class Action(Enum):
@@ -45,10 +67,15 @@ class Rule:
     def matches_resource(self, resource: str | None) -> bool:
         if resource is None:
             return self.resource in ("*", "./**/*")
-        from pathlib import PurePath
-        # Normalize: strip leading ./
-        res = resource[2:] if resource.startswith("./") else resource
-        pat = self.resource[2:] if self.resource.startswith("./") else self.resource
+        # Normalize both resource and pattern
+        res = _normalize_path(resource)
+        pat = _normalize_path(self.resource)
+
+        # If the original resource ended with / (directory path),
+        # check whether the pattern matches the directory as dir/*
+        if resource.endswith("/") and not res.endswith("/"):
+            if fnmatch.fnmatch(res + "/*", pat):
+                return True
 
         # Special handling for ** (recursive glob)
         if "**" in pat:

@@ -209,6 +209,61 @@ rules:
         g = Guard(p)
         assert g.check(ToolCall(tool="shell", resource="anything goes")).allowed is True
 
+    # ── Issue #139: path normalization ──────────────────────────────
+
+    def test_windows_backslash_path(self):
+        """matches_resource should handle Windows-style backslash paths."""
+        p = Policy.from_yaml("""
+name: win-test
+default_action: deny
+rules:
+  - action: allow
+    tool: "fs.read"
+    resource: "../*"
+""")
+        g = Guard(p)
+        # Windows backslash path should match the ../* pattern
+        assert g.check(ToolCall(tool="fs.read", resource="..\\..\\secret.txt")).allowed is True
+
+    def test_double_slash_path(self):
+        """Double slashes should be collapsed before matching."""
+        p = Policy.from_yaml("""
+name: double-slash
+default_action: deny
+rules:
+  - action: allow
+    tool: "fs.read"
+    resource: "foo/*"
+""")
+        g = Guard(p)
+        assert g.check(ToolCall(tool="fs.read", resource="foo//bar.txt")).allowed is True
+
+    def test_trailing_slash_directory(self):
+        """Trailing slash on a directory path should be stripped."""
+        p = Policy.from_yaml("""
+name: trailing-slash
+default_action: deny
+rules:
+  - action: allow
+    tool: "fs.read"
+    resource: "foo/*"
+""")
+        g = Guard(p)
+        assert g.check(ToolCall(tool="fs.read", resource="foo/")).allowed is True
+
+    def test_leading_dot_slash(self):
+        """Leading ./ should be stripped and still match."""
+        p = Policy.from_yaml("""
+name: dot-slash
+default_action: deny
+rules:
+  - action: allow
+    tool: "fs.read"
+    resource: "foo/*"
+""")
+        g = Guard(p)
+        assert g.check(ToolCall(tool="fs.read", resource="./foo/bar.txt")).allowed is True
+
 
 class TestVerdictRisk:
     def test_default_allow_risk(self):
