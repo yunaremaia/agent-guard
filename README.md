@@ -974,3 +974,7 @@ Rules are evaluated sequentially from top to bottom. The first matching rule det
 
 MIT © Yunare Maia
 
+
+# agent-guard
+
+![CI](https://github.com/yunaremaia/agent-guard/actions/workflows/python-tests.yml/badge.svg)
