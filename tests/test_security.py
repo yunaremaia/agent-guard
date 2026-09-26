@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, 'src')
 
 import pytest
-from agent_guard import Guard, Policy, ToolCall, Action, RiskLevel
+from agent_guard import Guard, Policy, ToolCall, Action, RiskLevel, Rule
 
 
 def test_redos_protection_long_pattern():
@@ -20,6 +20,60 @@ def test_redos_protection_nested_quantifiers():
     call = ToolCall(tool="fs.read", resource="(a+)+")
     verdict = guard.check(call)
     assert not verdict.allowed
+
+
+def test_redos_protection_execution_timeout():
+    """Tier 2: A pathological regex that triggers catastrophic backtracking
+    must be killed by the execution timeout, not hang the process."""
+    import time
+    # Policy with a rule that uses a regex pattern — the pathological input
+    # will be evaluated against this regex
+    policy = Policy(
+        name="test",
+        description="t",
+        default_action=Action.DENY,
+        rules=[
+            Rule(
+                action=Action.ALLOW,
+                tool="test",
+                resource=r"(a+)+b",  # pathological regex
+                description="allow if matches",
+            )
+        ],
+    )
+    guard = Guard(policy)
+    # (a+)+b on a string of 50 'a's then 'c' — will backtrack exponentially
+    call = ToolCall(tool="test", resource="a" * 50 + "c")
+    start = time.time()
+    verdict = guard.check(call)
+    elapsed = time.time() - start
+    # Should complete in < 2s (timeout is 1s, plus overhead)
+    assert elapsed < 2.0, f"ReDoS timeout not effective: took {elapsed:.2f}s"
+    assert not verdict.allowed, "Pathological regex should be rejected"
+
+
+def test_redos_protection_normal_regex_still_works():
+    """Normal regex patterns should still match correctly after timeout guard."""
+    policy = Policy(
+        name="test",
+        description="t",
+        default_action=Action.DENY,
+        rules=[
+            Rule(
+                action=Action.ALLOW,
+                tool="fs.read",
+                # Pattern with + quantifier and anchors — triggers regex path,
+                # but uses only literal chars that survive normalization
+                resource=r"^/home/user/[a-z]+\.txt$",
+                description="allow txt files in user dir",
+            )
+        ],
+    )
+    guard = Guard(policy)
+    # Path with only lowercase letters → matches [a-z]+
+    call = ToolCall(tool="fs.read", resource="/home/user/zzz.txt")
+    verdict = guard.check(call)
+    assert verdict.allowed
 
 
 def test_shell_injection_semicolon():
