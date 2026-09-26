@@ -18,13 +18,17 @@ from typing import Any
 import yaml
 
 
-def _normalize_path(path: str) -> str:
+def _normalize_path(path: str, *, security_check: bool = True) -> str:
     """Normalize a path for cross-platform matching.
 
     - Converts Windows backslashes to forward slashes.
     - Collapses consecutive slashes into one.
     - Strips a single leading ``./``.
     - Removes a single trailing slash (for directory patterns).
+    - When *security_check* is True (default), raises ValueError on path
+      traversal sequences (``../``) to prevent escape from sandbox/base
+      directories (issue #151). Set to False when normalizing policy patterns
+      that may legitimately reference parent directories.
     """
     # Windows backslash → forward slash
     p = path.replace("\\", "/")
@@ -34,6 +38,10 @@ def _normalize_path(path: str) -> str:
     # Strip leading ./
     if p.startswith("./"):
         p = p[2:]
+    # SECURITY: Reject path traversal sequences before further processing
+    # This prevents ../ attacks that could escape sandbox directories.
+    if security_check and ".." in p.split("/"):
+        raise ValueError(f"path traversal sequence detected in '{path}'")
     # Remove a single trailing slash if present
     if p.endswith("/") and len(p) > 1:
         p = p[:-1]
@@ -67,9 +75,29 @@ class Rule:
     def matches_resource(self, resource: str | None) -> bool:
         if resource is None:
             return self.resource in ("*", "./**/*")
-        # Normalize both resource and pattern
-        res = _normalize_path(resource)
-        pat = _normalize_path(self.resource)
+        # Normalize resource for path traversal detection
+        try:
+            res = _normalize_path(resource, security_check=True)
+        except ValueError:
+            # Path traversal attempt in resource — deny by default
+            return False
+
+        # Determine if this is a regex pattern (has regex-specific chars)
+        # Regex patterns must NOT be path-normalized (backslash→slash would
+        # destroy escapes like \. → /)
+        raw_pat = self.resource
+        is_regex = any(c in raw_pat for c in ['^', '$', '|', '(', ')', '+', '?', '{', '}'])
+
+        if is_regex:
+            # Use raw pattern for regex matching; only normalize resource
+            pat = raw_pat
+        else:
+            # Normalize glob patterns normally
+            try:
+                pat = _normalize_path(raw_pat, security_check=False)
+            except ValueError:
+                # Pattern has path traversal — misconfigured policy, treat as non-matching
+                return False
 
         # If the original resource ended with / (directory path),
         # check whether the pattern matches the directory as dir/*
@@ -96,16 +124,17 @@ class Rule:
                         return False
             return True
 
-        # Try PurePath.match (handles single-level globs)
-        try:
-            if PurePath(res).match(pat):
-                return True
-        except (ValueError, TypeError):
-            pass
+        # Try PurePath.match (handles single-level globs) — only for non-regex patterns
+        if not is_regex:
+            try:
+                if PurePath(res).match(pat):
+                    return True
+            except (ValueError, TypeError):
+                pass
 
-        # Fallback to fnmatch
-        if fnmatch.fnmatch(res, pat):
-            return True
+            # Fallback to fnmatch — only for non-regex patterns
+            if fnmatch.fnmatch(res, pat):
+                return True
 
         # Try regex match for patterns with regex-specific chars
         # SECURITY: Limit pattern length and complexity to prevent ReDoS
@@ -119,7 +148,25 @@ class Rule:
                 # Reject unbounded repetition on character classes: [a-z]{100,}
                 if re.search(r'\[[^\]]+\]\s*\{\d+,}', pat):
                     return False
-                return bool(re.fullmatch(pat, res))
+                # Tier 2: execution timeout — use a thread to bound catastrophic backtracking
+                result_holder: dict[str, Any] = {}
+                exception_holder: dict[str, BaseException] = {}
+
+                def _run_match() -> None:
+                    try:
+                        result_holder["matched"] = bool(re.fullmatch(pat, res))
+                    except BaseException as exc:
+                        exception_holder["exc"] = exc
+
+                thread = threading.Thread(target=_run_match, daemon=True)
+                thread.start()
+                thread.join(timeout=1.0)
+                if thread.is_alive():
+                    # Timeout — pattern caused catastrophic backtracking, reject
+                    return False
+                if "exc" in exception_holder:
+                    raise exception_holder["exc"]
+                return result_holder.get("matched", False)
         except re.error:
             pass
 

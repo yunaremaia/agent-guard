@@ -219,11 +219,24 @@ default_action: deny
 rules:
   - action: allow
     tool: "fs.read"
-    resource: "../*"
+    resource: "foo/*"
 """)
         g = Guard(p)
-        # Windows backslash path should match the ../* pattern
-        assert g.check(ToolCall(tool="fs.read", resource="..\\..\\secret.txt")).allowed is True
+        assert g.check(ToolCall(tool="fs.read", resource="foo\\bar.txt")).allowed is True
+
+    def test_path_traversal_blocked(self):
+        """Path traversal sequences (../) should be blocked."""
+        p = Policy.from_yaml("""
+name: traversal-test
+default_action: deny
+rules:
+  - action: allow
+    tool: "fs.read"
+    resource: "sandbox/*"
+""")
+        g = Guard(p)
+        assert g.check(ToolCall(tool="fs.read", resource="../etc/passwd")).allowed is False
+        assert g.check(ToolCall(tool="fs.read", resource="./sandbox/../../etc/shadow")).allowed is False
 
     def test_double_slash_path(self):
         """Double slashes should be collapsed before matching."""
