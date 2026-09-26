@@ -18,13 +18,17 @@ from typing import Any
 import yaml
 
 
-def _normalize_path(path: str) -> str:
+def _normalize_path(path: str, *, security_check: bool = True) -> str:
     """Normalize a path for cross-platform matching.
 
     - Converts Windows backslashes to forward slashes.
     - Collapses consecutive slashes into one.
     - Strips a single leading ``./``.
     - Removes a single trailing slash (for directory patterns).
+    - When *security_check* is True (default), raises ValueError on path
+      traversal sequences (``../``) to prevent escape from sandbox/base
+      directories (issue #151). Set to False when normalizing policy patterns
+      that may legitimately reference parent directories.
     """
     # Windows backslash → forward slash
     p = path.replace("\\", "/")
@@ -34,6 +38,10 @@ def _normalize_path(path: str) -> str:
     # Strip leading ./
     if p.startswith("./"):
         p = p[2:]
+    # SECURITY: Reject path traversal sequences before further processing
+    # This prevents ../ attacks that could escape sandbox directories.
+    if security_check and ".." in p.split("/"):
+        raise ValueError(f"path traversal sequence detected in '{path}'")
     # Remove a single trailing slash if present
     if p.endswith("/") and len(p) > 1:
         p = p[:-1]
@@ -68,8 +76,17 @@ class Rule:
         if resource is None:
             return self.resource in ("*", "./**/*")
         # Normalize both resource and pattern
-        res = _normalize_path(resource)
-        pat = _normalize_path(self.resource)
+        try:
+            res = _normalize_path(resource, security_check=True)
+        except ValueError:
+            # Path traversal attempt in resource — deny by default
+            return False
+        try:
+            pat = _normalize_path(self.resource, security_check=False)
+        except ValueError:
+            # Pattern has path traversal — this is a misconfigured policy,
+            # treat as non-matching to be safe
+            return False
 
         # If the original resource ended with / (directory path),
         # check whether the pattern matches the directory as dir/*
