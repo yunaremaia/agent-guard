@@ -10,12 +10,18 @@ import asyncio
 import re
 import fnmatch
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
 
 import yaml
+
+# Sentinel used to detect when an older loop.get_event_loop() is unavailable
+# (e.g., in some embedded environments). In those cases we fall back to
+# asyncio.to_thread which is available in Python 3.9+.
+_asyncio_loop_get_event_loop = getattr(asyncio, "get_event_loop", None)
 
 
 def _normalize_path(path: str, *, security_check: bool = True) -> str:
@@ -341,13 +347,26 @@ class GuardStats:
 
 
 class Guard:
-    """Evaluate tool calls against a policy."""
+    """Evaluate tool calls against a policy.
+
+    Thread-safe: all public methods may be called from multiple threads
+    concurrently. Async methods (check_async, check_batch_async) offload
+    synchronous work to a thread pool so the calling event loop is never
+    blocked.
+    """
 
     def __init__(self, policy: Policy):
         self.policy = policy
         self.execution_count = 0
         self.tool_call_count = 0
         self._lock = threading.Lock()
+        # FIXED (issue #117): use a dedicated thread pool for async offloading
+        # instead of spawning a new thread per call via asyncio.to_thread.
+        # The pool is bounded (max_workers=4) and reuses threads, so high-throughput
+        # agents don't exhaust OS thread resources.
+        self._executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="agent-guard"
+        )
 
     def reset(self) -> "Guard":
         """Reset execution and tool call counters to zero."""
@@ -459,14 +478,50 @@ class Guard:
         )
 
     async def check_async(self, call: ToolCall) -> Verdict:
-        # Async version of check().
-        
+        # FIXED (issue #117): offload to the thread pool instead of using
+        # asyncio.to_thread which creates a new thread per call.
+        # Uses the running loop's executor to avoid blocking the event loop.
+        try:
+            loop = _asyncio_loop_get_event_loop()
+            if loop is not None and not loop.is_closed():
+                return await loop.run_in_executor(self._executor, self.check, call)
+        except (RuntimeError, AttributeError):
+            pass
+        # Fallback for environments where get_event_loop is unavailable
         return await asyncio.to_thread(self.check, call)
 
-    async def check_batch_async(self, calls: list[ToolCall]) -> list[Verdict]:
-        # Check multiple calls concurrently.
-        
-        tasks = [self.check_async(call) for call in calls]
+    async def check_batch_async(
+        self,
+        calls: list[ToolCall],
+        *,
+        return_exceptions: bool = False,
+    ) -> list[Verdict]:
+        # FIXED (issue #117): evaluate calls concurrently via the thread pool
+        # instead of serializing through asyncio.to_thread per call.
+        #
+        # With return_exceptions=True, exceptions from individual checks are
+        # captured and returned as Verdict(allowed=False, risk=HIGH) with the
+        # exception message in the reason field, mirroring the module-level
+        # check_batch_async behavior.
+        loop = asyncio.get_running_loop()
+        if return_exceptions:
+            tasks = [loop.run_in_executor(self._executor, self.check, c) for c in calls]
+            raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+            verdicts = []
+            for r in raw_results:
+                if isinstance(r, BaseException):
+                    verdicts.append(
+                        Verdict(
+                            allowed=False,
+                            rule=None,
+                            reason=f"Error: {r}",
+                            risk=RiskLevel.HIGH,
+                        )
+                    )
+                else:
+                    verdicts.append(r)
+            return verdicts
+        tasks = [loop.run_in_executor(self._executor, self.check, c) for c in calls]
         return await asyncio.gather(*tasks)
 
     def _check_network(self, call: ToolCall) -> Verdict:
@@ -615,7 +670,8 @@ async def check_batch_async(
         PolicyViolation: When *raise_on_deny* is True and any call is denied.
     """
     guard = Guard(policy)
-    tasks = [asyncio.to_thread(guard.check, call) for call in tool_calls]
+    loop = asyncio.get_running_loop()
+    tasks = [loop.run_in_executor(guard._executor, guard.check, call) for call in tool_calls]
     verdicts = await asyncio.gather(*tasks)
     decisions = [PolicyDecision.from_verdict(v) for v in verdicts]
     if raise_on_deny:
