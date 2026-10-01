@@ -985,6 +985,7 @@ If this tool is useful to you, a star helps other people find it.
 
 Part of a family of focused, single-purpose developer tools — each one does one thing
 and does it well.
+
 ## License
 
 MIT © Yunare Maia
