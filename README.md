@@ -989,8 +989,3 @@ and does it well.
 ## License
 
 MIT © Yunare Maia
-
-
-# agent-guard
-
-![CI](https://github.com/yunaremaia/agent-guard/actions/workflows/python-tests.yml/badge.svg)
