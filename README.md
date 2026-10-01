@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/yunaremaia/agent-guard/actions/workflows/python-tests.yml/badge.svg)](https://github.com/yunaremaia/agent-guard/actions/workflows/python-tests.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/yunaremaia/agent-guard/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/yunaremaia/agent-guard/blob/main/LICENSE) [![Stars](https://img.shields.io/github/stars/yunaremaia/agent-guard)](https://github.com/yunaremaia/agent-guard)
 
 **Policy-as-code for AI agent permissions.**
 
@@ -974,6 +974,17 @@ Rules are evaluated sequentially from top to bottom. The first matching rule det
 | OpenAI sandbox | ❌ | ❌ | ❌ | ❌ |
 | Custom code | ✅ | ❌ | ✅ | ❌ |
 
+If this tool is useful to you, a star helps other people find it.
+
+## Related tools
+
+- **[driftcheck](https://github.com/yunaremaia/driftcheck)** — detect version drift between docs and toolchain files
+- **[agentcost](https://github.com/yunaremaia/agentcost)** — track and attribute LLM spend per agent
+- **[agent-workspace](https://github.com/yunaremaia/agent-workspace)** — isolated workspaces per AI agent session
+- **[tool-call-retry](https://github.com/yunaremaia/tool-call-retry)** — retry failed tool calls with backoff
+
+Part of a family of focused, single-purpose developer tools — each one does one thing
+and does it well.
 ## License
 
 MIT © Yunare Maia
