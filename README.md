@@ -20,12 +20,16 @@ AI agents need bounded permissions. Current solutions are either:
 ## Install
 
 ```bash
-pip install agentperm-py
+pip install git+https://github.com/yunaremaia/agent-guard.git
 ```
 
+> **Note on installation:** this project is not published on PyPI, so it installs
+> from the git repository rather than from the index.
+
 > **Note:** the `agent-guard` name on PyPI is taken by an unrelated project by a
-> different author (a monitoring library for Crew AI). This project ships as
-> `agentperm-py`; the `agent-guard` command and the `agent_guard` import are unchanged.
+> different author (a monitoring library for Crew AI). This distribution is
+> `agentperm-py`; the `agent-guard` command and the `agent_guard` import are
+> unchanged.
 
 ## Quick Start
 
