@@ -71,7 +71,7 @@ def explain(policy_file: str, tool: str, resource: str):
     click.echo(f"Risk: {verdict.risk.value}")
 
     if verdict.rule:
-        click.echo(f"Matched rule:")
+        click.echo("Matched rule:")
         click.echo(f"  action: {verdict.rule.action.value}")
         click.echo(f"  resource: {verdict.rule.resource}")
         click.echo(f"  tool: {verdict.rule.tool}")

@@ -18,7 +18,7 @@ classifiers = [
 dependencies = ["pyyaml>=6.0", "click>=8.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "ruff==0.16.10"]
 
 [project.scripts]
 agent-guard = "agent_guard.main:cli"
@@ -33,6 +33,40 @@ packages = ["src/agent_guard"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# Rule selection is PINNED ON PURPOSE, not left to ruff's implicit defaults.
+# Ruff changes its default rule set between releases (new rules get promoted,
+# preview rules graduate), so an unpinned gate silently starts failing on an
+# unrelated ruff bump and local runs drift from CI. Listing the codes
+# explicitly makes the gate reproducible across ruff versions.
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "C4",   # flake8-comprehensions
+    "RET",  # flake8-return
+    "PIE",  # flake8-pie
+    "PTH",  # flake8-use-pathlib
+    "RUF",  # ruff-specific
+    "BLE",  # flake8-blind-except
+    "TRY",  # tryceratops
+    "FURB", # refurb
+]
+ignore = [
+    # TRY003 wants validation messages hoisted into the exception class. This
+    # project deliberately keeps them inline: they interpolate per-rule context
+    # (e.g. "Rule 0: 'action' ...") and are part of the documented, test-asserted
+    # error contract from issues #137/#140. Hoisting would drop that context.
+    "TRY003",
+]
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
