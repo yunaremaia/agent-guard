@@ -17,6 +17,8 @@ from typing import Any
 
 import yaml
 
+from .redos import is_safe_pattern, looks_like_regex
+
 
 def _normalize_path(path: str, *, security_check: bool = True) -> str:
     """Normalize a path for cross-platform matching.
@@ -145,18 +147,15 @@ class Rule:
                 return True
 
         # Try regex match for patterns with regex-specific chars
-        # SECURITY: Limit pattern length and complexity to prevent ReDoS
+        # SECURITY: Reject patterns that can cause catastrophic backtracking
+        # (ReDoS) before they ever reach the regex engine.
         try:
             if any(c in pat for c in ['^', '$', '|', '(', ')', '+', '?', '{', '}']):
-                if len(pat) > 100:
+                safe, _reason = is_safe_pattern(pat)
+                if not safe:
                     return False
-                # Reject nested quantifiers: (expr)*+? where expr itself contains a quantifier
-                if re.search(r'\([^)]*[*+?][^)]*\)[*+?]', pat):
-                    return False
-                # Reject unbounded repetition on character classes: [a-z]{100,}
-                if re.search(r'\[[^\]]+\]\s*\{\d+,}', pat):
-                    return False
-                # Tier 2: execution timeout — use a thread to bound catastrophic backtracking
+                # Tier 2: execution timeout — use a thread to bound catastrophic
+                # backtracking that the static pass cannot rule out.
                 result_holder: dict[str, Any] = {}
                 exception_holder: dict[str, BaseException] = {}
 
@@ -260,6 +259,17 @@ class Policy:
                 raise PolicyValidationError(f"Rule {i}: 'resource' must be a string")
             if not isinstance(tool, str):
                 raise PolicyValidationError(f"Rule {i}: 'tool' must be a string")
+            # SECURITY: refuse user-supplied regexes that can cause catastrophic
+            # backtracking at load time, so a bad pattern is reported to the
+            # author instead of silently never matching (issue #166).
+            for field_name, value in (("resource", resource), ("tool", tool)):
+                if not looks_like_regex(value):
+                    continue
+                safe, reason = is_safe_pattern(value)
+                if not safe:
+                    raise PolicyValidationError(
+                        f"Rule {i}: unsafe regex in {field_name!r}: {reason}"
+                    )
             rules.append(
                 Rule(
                     action=action,
