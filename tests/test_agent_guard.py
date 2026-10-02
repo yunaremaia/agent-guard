@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 import asyncio
+from pathlib import Path
 
-from agent_guard import Action, Guard, GuardStats, Policy, RiskLevel, Rule, ToolCall
+import pytest
 
+from agent_guard import Action, Guard, GuardStats, Policy, RiskLevel, ToolCall
 
 SAMPLE_POLICY = """
 name: test-agent

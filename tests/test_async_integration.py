@@ -10,7 +10,6 @@ import asyncio
 import pytest
 
 from agent_guard import (
-    Action,
     Guard,
     Policy,
     PolicyDecision,
@@ -20,7 +19,6 @@ from agent_guard import (
     check_async,
     check_batch_async,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
