@@ -1,9 +1,11 @@
 """Tests for agent-guard security fixes."""
 import sys
+
 sys.path.insert(0, 'src')
 
 import pytest
-from agent_guard import Guard, Policy, ToolCall, Action, RiskLevel, Rule
+
+from agent_guard import Action, Guard, Policy, RiskLevel, Rule, ToolCall
 
 
 def test_redos_protection_long_pattern():

@@ -4,7 +4,6 @@ from pathlib import Path
 
 from agent_guard import Action, Policy
 
-
 POLICY_DIR = Path(__file__).parents[1] / "examples" / "policies"
 EXPECTED_POLICIES = {
     "ci-agent.yaml": "ci-agent",
