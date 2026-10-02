@@ -7,8 +7,8 @@ Prevents agents from exceeding defined scopes (network, filesystem, commands).
 from __future__ import annotations
 
 import asyncio
-import re
 import fnmatch
+import re
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
@@ -36,8 +36,7 @@ def _normalize_path(path: str, *, security_check: bool = True) -> str:
     while "//" in p:
         p = p.replace("//", "/")
     # Strip leading ./
-    if p.startswith("./"):
-        p = p[2:]
+    p = p.removeprefix("./")
     # SECURITY: Reject path traversal sequences before further processing
     # This prevents ../ attacks that could escape sandbox directories.
     if security_check and ".." in p.split("/"):
@@ -58,6 +57,16 @@ class RiskLevel(Enum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+
+class PolicyValidationError(ValueError, TypeError):
+    """Raised when a policy document or tool call has an invalid type.
+
+    Subclasses both :class:`ValueError` and :class:`TypeError` so that the
+    documented public contract (``except ValueError``, see issues #137/#140)
+    keeps working for existing callers, while type-checking failures are also
+    correctly catchable as :class:`TypeError`.
+    """
 
 
 @dataclass
@@ -101,9 +110,8 @@ class Rule:
 
         # If the original resource ended with / (directory path),
         # check whether the pattern matches the directory as dir/*
-        if resource.endswith("/") and not res.endswith("/"):
-            if fnmatch.fnmatch(res + "/*", pat):
-                return True
+        if resource.endswith("/") and not res.endswith("/") and fnmatch.fnmatch(res + "/*", pat):
+            return True
 
         # Special handling for ** (recursive glob)
         if "**" in pat:
@@ -155,7 +163,11 @@ class Rule:
                 def _run_match() -> None:
                     try:
                         result_holder["matched"] = bool(re.fullmatch(pat, res))
-                    except BaseException as exc:
+                    # Narrow on purpose: re.fullmatch can raise re.error (bad
+                    # pattern), MemoryError or RecursionError on catastrophic
+                    # backtracking. Those are marshalled back to the caller
+                    # thread below; anything else is a bug and fails closed.
+                    except (re.error, MemoryError, RecursionError) as exc:
                         exception_holder["exc"] = exc
 
                 thread = threading.Thread(target=_run_match, daemon=True)
@@ -186,10 +198,10 @@ class Policy:
     blocked_domains: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_yaml(cls, text: str) -> "Policy":
+    def from_yaml(cls, text: str) -> Policy:
         data = yaml.safe_load(text)
         if not isinstance(data, dict):
-            raise ValueError("Policy YAML must be a mapping")
+            raise PolicyValidationError("Policy YAML must be a mapping")
 
         # Validate known fields and detect unknown ones
         known_fields = {
@@ -217,37 +229,37 @@ class Policy:
 
         description = data.get("description", "")
         if not isinstance(description, str):
-            raise ValueError("Policy 'description' must be a string")
+            raise PolicyValidationError("Policy 'description' must be a string")
 
         default_action_raw = data.get("default_action", "deny")
         if not isinstance(default_action_raw, str):
-            raise ValueError("Policy 'default_action' must be a string")
+            raise PolicyValidationError("Policy 'default_action' must be a string")
         try:
             default_action = Action(default_action_raw)
-        except ValueError:
+        except ValueError as exc:
             raise ValueError(
                 f"Policy 'default_action' must be 'allow' or 'deny', got '{default_action_raw}'"
-            )
+            ) from exc
 
         rules = []
         for i, r in enumerate(data.get("rules", [])):
             if not isinstance(r, dict):
-                raise ValueError(f"Rule {i} must be a mapping")
+                raise PolicyValidationError(f"Rule {i} must be a mapping")
             action_raw = r.get("action", "allow")
             if not isinstance(action_raw, str):
-                raise ValueError(f"Rule {i}: 'action' must be a string")
+                raise PolicyValidationError(f"Rule {i}: 'action' must be a string")
             try:
                 action = Action(action_raw)
-            except ValueError:
+            except ValueError as exc:
                 raise ValueError(
                     f"Rule {i}: 'action' must be 'allow' or 'deny', got '{action_raw}'"
-                )
+                ) from exc
             resource = r.get("resource", "*")
             tool = r.get("tool", "*")
             if not isinstance(resource, str):
-                raise ValueError(f"Rule {i}: 'resource' must be a string")
+                raise PolicyValidationError(f"Rule {i}: 'resource' must be a string")
             if not isinstance(tool, str):
-                raise ValueError(f"Rule {i}: 'tool' must be a string")
+                raise PolicyValidationError(f"Rule {i}: 'tool' must be a string")
             rules.append(
                 Rule(
                     action=action,
@@ -262,21 +274,30 @@ class Policy:
                 return None
             if isinstance(val, int) and not isinstance(val, bool):
                 return val
-            raise ValueError(f"Policy '{field_name}' must be an integer or null, got {type(val).__name__}")
+            raise ValueError(
+                f"Policy '{field_name}' must be an integer or null, "
+                f"got {type(val).__name__}"
+            )
 
         max_executions = _coerce_int_or_none(data.get("max_executions"), "max_executions")
         max_tool_calls = _coerce_int_or_none(data.get("max_tool_calls"), "max_tool_calls")
 
         blocked_tools = data.get("blocked_tools", [])
-        if not isinstance(blocked_tools, list) or not all(isinstance(t, str) for t in blocked_tools):
+        if not isinstance(blocked_tools, list) or not all(
+            isinstance(t, str) for t in blocked_tools
+        ):
             raise ValueError("Policy 'blocked_tools' must be a list of strings")
 
         allowed_domains = data.get("allowed_domains", [])
-        if not isinstance(allowed_domains, list) or not all(isinstance(d, str) for d in allowed_domains):
+        if not isinstance(allowed_domains, list) or not all(
+            isinstance(d, str) for d in allowed_domains
+        ):
             raise ValueError("Policy 'allowed_domains' must be a list of strings")
 
         blocked_domains = data.get("blocked_domains", [])
-        if not isinstance(blocked_domains, list) or not all(isinstance(d, str) for d in blocked_domains):
+        if not isinstance(blocked_domains, list) or not all(
+            isinstance(d, str) for d in blocked_domains
+        ):
             raise ValueError("Policy 'blocked_domains' must be a list of strings")
 
         return cls(
@@ -292,10 +313,10 @@ class Policy:
         )
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "Policy":
+    def from_file(cls, path: str | Path) -> Policy:
         return cls.from_yaml(Path(path).read_text())
     @classmethod
-    async def from_file_async(cls, path: str | Path) -> "Policy":
+    async def from_file_async(cls, path: str | Path) -> Policy:
         return await asyncio.to_thread(cls.from_file, path)
 
 
@@ -325,8 +346,8 @@ class GuardStats:
     def __getitem__(self, key: str) -> Any:
         try:
             return getattr(self, key)
-        except AttributeError:
-            raise KeyError(key)
+        except AttributeError as exc:
+            raise KeyError(key) from exc
 
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
@@ -349,7 +370,7 @@ class Guard:
         self.tool_call_count = 0
         self._lock = threading.Lock()
 
-    def reset(self) -> "Guard":
+    def reset(self) -> Guard:
         """Reset execution and tool call counters to zero."""
         with self._lock:
             self.execution_count = 0
@@ -374,8 +395,8 @@ class Guard:
         if call.resource is not None and not isinstance(call.resource, str):
             raise ValueError("resource must be None or a string")
         if not isinstance(call.arguments, dict):
-            # issue #137 specifies ValueError; TRY004 would prefer TypeError.
-            raise ValueError("arguments must be a dict")  # noqa: TRY004
+            # issue #137 specifies ValueError; PolicyValidationError is both.
+            raise PolicyValidationError("arguments must be a dict")
 
         with self._lock:
             self.tool_call_count += 1
@@ -435,13 +456,12 @@ class Guard:
                         reason=f"allowed by rule: {rule.description or rule.resource}",
                         risk=RiskLevel.LOW,
                     )
-                else:
-                    return Verdict(
-                        allowed=False,
-                        rule=rule,
-                        reason=f"denied by rule: {rule.description or rule.resource}",
-                        risk=RiskLevel.MEDIUM,
-                    )
+                return Verdict(
+                    allowed=False,
+                    rule=rule,
+                    reason=f"denied by rule: {rule.description or rule.resource}",
+                    risk=RiskLevel.MEDIUM,
+                )
 
         # Default action
         if self.policy.default_action == Action.ALLOW:
@@ -460,12 +480,12 @@ class Guard:
 
     async def check_async(self, call: ToolCall) -> Verdict:
         # Async version of check().
-        
+
         return await asyncio.to_thread(self.check, call)
 
     async def check_batch_async(self, calls: list[ToolCall]) -> list[Verdict]:
         # Check multiple calls concurrently.
-        
+
         tasks = [self.check_async(call) for call in calls]
         return await asyncio.gather(*tasks)
 
@@ -533,7 +553,7 @@ class PolicyDecision:
         return not self.allowed
 
     @classmethod
-    def from_verdict(cls, verdict: Verdict) -> "PolicyDecision":
+    def from_verdict(cls, verdict: Verdict) -> PolicyDecision:
         """Create a PolicyDecision from an internal Verdict."""
         return cls(
             allowed=verdict.allowed,
@@ -631,6 +651,7 @@ __all__ = [
     "GuardStats",
     "Policy",
     "PolicyDecision",
+    "PolicyValidationError",
     "PolicyViolation",
     "RiskLevel",
     "Rule",

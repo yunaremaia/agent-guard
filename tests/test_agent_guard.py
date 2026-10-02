@@ -237,7 +237,8 @@ rules:
 """)
         g = Guard(p)
         assert g.check(ToolCall(tool="fs.read", resource="../etc/passwd")).allowed is False
-        assert g.check(ToolCall(tool="fs.read", resource="./sandbox/../../etc/shadow")).allowed is False
+        call = ToolCall(tool="fs.read", resource="./sandbox/../../etc/shadow")
+        assert g.check(call).allowed is False
 
     def test_double_slash_path(self):
         """Double slashes should be collapsed before matching."""

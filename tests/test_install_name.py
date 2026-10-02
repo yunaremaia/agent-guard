@@ -154,7 +154,9 @@ class TestNoBarePyPIInstallAnywhere:
 
     def test_no_surface_installs_a_forbidden_bare_name(self):
         offenders = {
-            name: lines[:5] for name, path in doc_surfaces() if (lines := bare_install_lines(_read(path)))
+            name: lines[:5]
+            for name, path in doc_surfaces()
+            if (lines := bare_install_lines(_read(path)))
         }
         offenders = {name: lines for name, lines in offenders.items() if lines}
         assert not offenders, (
@@ -182,7 +184,11 @@ class TestTargetParsing:
         assert bare_install_lines("pip install agent-guard")
 
     def test_uv_and_pip3_variants_are_covered(self):
-        for line in ("uv tool install agent-guard", "uv pip install agent-guard", "pip3 install agent-guard"):
+        for line in (
+            "uv tool install agent-guard",
+            "uv pip install agent-guard",
+            "pip3 install agent-guard",
+        ):
             assert bare_install_lines(line), line
 
     def test_unrelated_packages_are_not_caught(self):
@@ -234,7 +240,8 @@ class TestReadmeDisclosesTheNameSituation:
         assert REPO_NAME in text
         assert "pypi" in text
         assert any(
-            phrase in text for phrase in ("different author", "another author", "unrelated", "taken")
+            phrase in text
+            for phrase in ("different author", "another author", "unrelated", "taken")
         ), "README must say the agent-guard PyPI name belongs to another project"
 
     def test_unpublished_state_is_disclosed(self):
