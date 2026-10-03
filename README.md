@@ -984,6 +984,22 @@ Rules are evaluated sequentially from top to bottom. The first matching rule det
 
 If this tool is useful to you, a star helps other people find it.
 
+## Sponsoring / Treasury
+
+agent-guard is MIT licensed and maintained in the open. Keeping policy-as-code for AI
+agent permissions free to install means keeping the rules engine, the CLI, and the
+runtime checks shipping on every release. If it saves you time, you can support
+continued development through GitHub Sponsors or the Solana treasury below.
+
+Funding details are declared in [`.github/FUNDING.yml`](.github/FUNDING.yml), which is
+what GitHub reads to render the **Sponsor** button on this repository.
+
+- **GitHub Sponsors:** [@yunaremaia](https://github.com/sponsors/yunaremaia)
+- **Solana:** `Eeztv1nCYUt1fwGWpzKC948gaWfjejYCAuLtUMgzDWbW`
+
+Use the Solana address only for intended donations. Anyone can generate a similar
+address, so verify the address against `.github/FUNDING.yml` before sending funds.
+
 ## Related tools
 
 - **[driftcheck](https://github.com/yunaremaia/driftcheck)** — detect version drift between docs and toolchain files
