@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recursive `**` globs now match zero path segments (#175)** — `**` is
+  handled by a `partition("**/")` split that has no case for a *trailing*
+  `**`: `"/home/**"` contains no `"/**/"`, so the whole literal pattern landed
+  in `prefix` and the check degenerated to `res.startswith("/home/**")`, which
+  is true for no real path. Every `**` pattern that does not end in `*/`
+  therefore matched nothing — a `deny` rule on `/home/**` silently failed open
+  under `default_action: allow`, and the README's own templates
+  (`./research/**`, `./deploy/**`, `./.github/**`, `../**`) were dead as
+  written. Resource patterns are now matched segment-wise, so `**` matches
+  zero or more path segments per standard globstar/`.gitignore` semantics:
+  `/home/**` matches `/home`, `/home/a` and `/home/a/b`; a bare `**` matches
+  everything including the root path. A single `*` still stays inside its own
+  segment, and regex patterns are untouched.
 - **Domain policies are no longer bypassed by removing the scheme (#176)** —
   `allowed_domains` and `blocked_domains` were only enforced when a network
   tool's resource contained `://` or began with `www.`. Every other spelling of

@@ -50,6 +50,50 @@ def _normalize_path(path: str, *, security_check: bool = True) -> str:
     return p
 
 
+def _globstar_segments_match(pat: str, res: str) -> bool:
+    """Match ``res`` against ``pat`` segment-wise, where a whole-segment ``**``
+    matches **zero or more** path segments (standard globstar / .gitignore
+    semantics, issue #175).
+
+    Splitting both sides on ``/`` keeps a single ``*`` inside its own segment,
+    which is what the prefix/suffix form already did for ``**/*.py``, while
+    making ``/home/**`` match ``/home`` itself.
+
+    Failed ``(pattern index, resource index)`` pairs are memoised so a pattern
+    holding several ``**`` cannot degrade into exponential backtracking.
+    """
+    pat_segs = pat.split("/")
+    res_segs = res.split("/")
+    dead: set[tuple[int, int]] = set()
+
+    def match(pi: int, ri: int) -> bool:
+        if (pi, ri) in dead:
+            return False
+        while pi < len(pat_segs):
+            seg = pat_segs[pi]
+            if seg == "**":
+                # Zero segments...
+                if match(pi + 1, ri):
+                    return True
+                # ...then one or more, consuming one segment per retry.
+                for ri2 in range(ri, len(res_segs)):
+                    if match(pi + 1, ri2 + 1):
+                        return True
+                dead.add((pi, ri))
+                return False
+            if ri >= len(res_segs) or not fnmatch.fnmatch(res_segs[ri], seg):
+                dead.add((pi, ri))
+                return False
+            pi += 1
+            ri += 1
+        matched = ri == len(res_segs)
+        if not matched:
+            dead.add((pi, ri))
+        return matched
+
+    return match(0, 0)
+
+
 def _extract_domain(resource: str | None) -> str | None:
     """Reduce a network resource to its host, or ``None`` when there is none.
 
@@ -153,6 +197,15 @@ class Rule:
 
         # Special handling for ** (recursive glob)
         if "**" in pat:
+            # `**` matches zero or more path segments (issue #175). The old
+            # partition("**/") split had no case for a *trailing* `**`, where
+            # the separator "/**/" never appears: "/home/**" put the whole
+            # literal pattern in `prefix`, degenerating the check to
+            # res.startswith("/home/**") -- true for no real path, so deny rules
+            # written that way silently failed open. Matching segment-wise lets
+            # `**` consume zero segments too, so "/home/**" matches "/home".
+            if not is_regex:
+                return _globstar_segments_match(pat, res)
             prefix, _, suffix = pat.partition("**/")
             # Prefix match (before **)
             if prefix and not res.startswith(prefix.rstrip("/")):
