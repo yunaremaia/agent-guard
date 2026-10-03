@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Domain policies are no longer bypassed by removing the scheme (#176)** —
+  `allowed_domains` and `blocked_domains` were only enforced when a network
+  tool's resource contained `://` or began with `www.`. Every other spelling of
+  the same host (`metadata.internal.corp`, `//metadata.internal.corp`,
+  `metadata.internal.corp:8443/x`, `HTTPS://METADATA.INTERNAL.CORP`,
+  `https://user:secret@metadata.internal.corp/latest`) left the extracted host
+  empty, which skipped the entire block containing *both* the blocklist and the
+  allowlist checks, and the verdict then reported `domain ok, allow by rule` —
+  claiming a check that never ran. Hosts are now parsed with
+  `urllib.parse.urlsplit` (userinfo stripped, port dropped, host lower-cased)
+  and a resource that cannot be reduced to a host now fails closed whenever a
+  domain policy is configured.
 
 ## [0.1.0] - 2026-10-03
 
