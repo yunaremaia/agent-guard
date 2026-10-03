@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -47,6 +48,41 @@ def _normalize_path(path: str, *, security_check: bool = True) -> str:
     if p.endswith("/") and len(p) > 1:
         p = p[:-1]
     return p
+
+
+def _extract_domain(resource: str | None) -> str | None:
+    """Reduce a network resource to its host, or ``None`` when there is none.
+
+    Normalises the resource with :func:`urllib.parse.urlsplit` so every spelling
+    of the same authority yields the same host:
+
+    - ``https://user:pw@Example.COM:8443/x`` -> ``example.com`` (userinfo
+      stripped, port dropped, host lower-cased by ``.hostname``).
+    - ``example.com/x`` and ``//example.com/x`` -> ``example.com`` (a scheme-less
+      resource is parsed as ``//``-prefixed, per RFC 3986 network-path
+      references).
+
+    Returns ``None`` for an empty resource, a resource with no host at all
+    (``/etc/passwd``), or one :mod:`urllib.parse` rejects (a malformed IPv6
+    literal such as ``https://[::1``). Callers must treat ``None`` as "no domain
+    could be determined" and fail closed when a domain policy is configured
+    (issue #176).
+    """
+    candidate = (resource or "").strip()
+    if not candidate:
+        return None
+    # A scheme-less resource ("example.com/x") is a valid network-path
+    # reference; prefixing "//" lets urlsplit find the authority. Already
+    # "//"-prefixed inputs are left alone so they are not parsed as a host
+    # named "" with an empty path.
+    if "://" not in candidate and not candidate.startswith("//"):
+        candidate = f"//{candidate}"
+    try:
+        host = urlsplit(candidate).hostname
+    except ValueError:
+        # Malformed authority (e.g. an unterminated IPv6 literal).
+        return None
+    return host.lower() if host else None
 
 
 class Action(Enum):
@@ -501,14 +537,28 @@ class Guard:
 
     def _check_network(self, call: ToolCall) -> Verdict:
         resource = call.resource or ""
-        # Extract domain from URL if present
-        domain = ""
-        if "://" in resource:
-            domain = resource.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
-        elif resource.startswith("www."):
-            domain = resource.split("/", 1)[0]
+        domain = _extract_domain(resource)
+        # Only meaningful when the policy actually constrains domains; without
+        # one there is nothing to check, so a non-URL resource is not an error.
+        domain_policy = bool(self.policy.allowed_domains or self.policy.blocked_domains)
 
-        if domain:
+        # SECURITY (issue #176): when a domain policy exists but the resource
+        # cannot be reduced to a host, deny instead of silently skipping the
+        # blocklist/allowlist. The previous code parsed the host only when the
+        # resource contained "://" or began with "www.", so "internal.corp",
+        # "//internal.corp", "HTTPS://INTERNAL.CORP" and
+        # "https://user@internal.corp/" all left domain == "" and skipped the
+        # whole enforcement block. Failing closed matches how
+        # Rule.matches_resource already treats an unparseable path traversal.
+        if domain is None and domain_policy:
+            return Verdict(
+                allowed=False,
+                rule=None,
+                reason=f"could not determine target domain from resource '{resource}'",
+                risk=RiskLevel.MEDIUM,
+            )
+
+        if domain is not None:
             for bd in self.policy.blocked_domains:
                 if fnmatch.fnmatch(domain, bd):
                     return Verdict(
@@ -527,20 +577,24 @@ class Guard:
                         risk=RiskLevel.MEDIUM,
                     )
 
-        # Fall through to normal rules
+        # The domain (if any) passed. Fall through to the normal rules. The
+        # prefix reports what was actually verified, so a verdict never claims
+        # a domain check that did not run.
+        prefix = "domain ok" if domain_policy else "no domain policy configured"
+
         for rule in self.policy.rules:
             if rule.matches_tool(call.tool) and rule.matches_resource(call.resource):
                 return Verdict(
                     allowed=rule.action == Action.ALLOW,
                     rule=rule,
-                    reason=f"domain ok, {rule.action.value} by rule",
+                    reason=f"{prefix}, {rule.action.value} by rule",
                     risk=RiskLevel.LOW,
                 )
 
         return Verdict(
             allowed=self.policy.default_action == Action.ALLOW,
             rule=None,
-            reason="domain check passed, no matching rule — using default",
+            reason=f"{prefix}, no matching rule — using default",
             risk=RiskLevel.MEDIUM,
         )
 

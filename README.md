@@ -808,8 +808,8 @@ Agent Guard policies are written in standard YAML. Below are all available field
 | `max_tool_calls` | `integer` | `null` | Maximum tool calls allowed per session before tripping a block. |
 | `max_executions` | `integer` | `null` | Maximum policy execution count. |
 | `blocked_tools` | `list[string]` | `[]` | Glob patterns for tools that are unconditionally blocked (e.g. `destructive_*`). |
-| `allowed_domains` | `list[string]` | `[]` | Glob patterns for permitted domains on network tools (`browser`, `http`, `fetch`, `request`). If specified, any non-matching domain is blocked. |
-| `blocked_domains` | `list[string]` | `[]` | Glob patterns for domains that are explicitly blocked. |
+| `allowed_domains` | `list[string]` | `[]` | Glob patterns for permitted domains on network tools (`browser`, `http`, `fetch`, `request`). If specified, any non-matching domain is blocked. Hosts are matched case-insensitively, and a resource that cannot be reduced to a host (`metadata.internal.corp`, `//metadata.internal.corp`, `HTTPS://METADATA.INTERNAL.CORP`, `https://user@metadata.internal.corp/`) is matched against these patterns too — a domain policy fails closed rather than skipping the check. |
+| `blocked_domains` | `list[string]` | `[]` | Glob patterns for domains that are explicitly blocked. Matched case-insensitively against the host of every network-tool resource, however the URL is spelled. |
 | `rules` | `list[object]` | `[]` | Ordered list of evaluation rules evaluated top-to-bottom. First match wins. |
 
 ### Rule Fields
