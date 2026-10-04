@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`max_tool_calls: 0` and `max_executions: 0` are no longer silently
+  ignored (#174)** — `Guard.check()` gated the global limits behind a
+  truthiness test (`if self.policy.max_tool_calls and current_count > ...`), and
+  `0` is falsy, so the enforcement block was skipped entirely. A policy that
+  explicitly asked for a **zero budget** enforced **no limit at all**: it
+  loaded without error, `stats()` reported `max_tool_calls: 0`, every call was
+  allowed forever, and the reason string never mentioned the budget — a
+  fail-open defect in the enforcement path. Both limits are now tested against
+  `None` instead, so an explicit integer is always enforced.
+
+  **`0` means DENY ALL; only `null`/absent means "no limit".** This is the
+  owner's explicit decision, and it is fail-closed by design: agent-guard is a
+  deny-oriented guard, so silently *widening* a policy because someone wrote
+  `0` is the dangerous direction. `max_tool_calls: 0` denies the first call
+  with reason `max_tool_calls exceeded (0)` and `agent-guard check` exits `1`;
+  `max_tool_calls: null` remains unlimited. The same applies to
+  `max_executions`.
+
+  The `audit` table had the same truthiness test and printed no limit line at
+  all for a zero budget, leaving an operator no way to see that the policy
+  permits nothing; it now prints `Max tool calls: 0`.
 - **Recursive `**` globs now match zero path segments (#175)** — `**` is
   handled by a `partition("**/")` split that has no case for a *trailing*
   `**`: `"/home/**"` contains no `"/**/"`, so the whole literal pattern landed

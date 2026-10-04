@@ -135,7 +135,10 @@ def audit(policy_file: str, fmt: str):
             click.echo(f"Blocked tools: {', '.join(policy.blocked_tools)}")
         if policy.allowed_domains:
             click.echo(f"Allowed domains: {', '.join(policy.allowed_domains)}")
-        if policy.max_tool_calls:
+        # `is not None`, not truthiness (issue #174): a zero budget is a real
+        # limit, and hiding it from the audit report left an operator with no
+        # way to see that the policy permits nothing.
+        if policy.max_tool_calls is not None:
             click.echo(f"Max tool calls: {policy.max_tool_calls}")
 
 

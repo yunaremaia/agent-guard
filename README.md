@@ -646,6 +646,19 @@ rules:
 
 After 50 calls, all subsequent calls are denied.
 
+The limit is **fail-closed**, so `0` and "unset" are different things:
+
+| Value | Meaning |
+|-------|---------|
+| `max_tool_calls: 50` | At most 50 calls; call 51 and beyond are denied. |
+| `max_tool_calls: 0` | **Zero calls permitted** — every call is denied from the first one. |
+| `max_tool_calls: null` / omitted | No limit configured. |
+
+An explicit `0` is enforced as a limit of zero rather than being treated as
+"unset", because agent-guard is a deny-oriented guard: silently widening a
+policy because someone wrote `0` is the dangerous direction, so the ambiguous
+case fails closed. The same applies to `max_executions`.
+
 ### Q: What's the risk scoring system?
 
 **A**: Each verdict includes a risk level:
@@ -805,8 +818,8 @@ Agent Guard policies are written in standard YAML. Below are all available field
 | `name` | `string` | *(required)* | Identifier for the policy. |
 | `description` | `string` | `""` | Description of the agent's role and boundaries. |
 | `default_action` | `string` (`allow` \| `deny`) | `"deny"` | Fallback action when no rules match. |
-| `max_tool_calls` | `integer` | `null` | Maximum tool calls allowed per session before tripping a block. |
-| `max_executions` | `integer` | `null` | Maximum policy execution count. |
+| `max_tool_calls` | `integer` \| `null` | `null` | Maximum tool calls allowed per session before tripping a block. **`0` means zero calls are permitted** — the policy becomes a deny-all. Only `null` or an absent field means "no limit". |
+| `max_executions` | `integer` \| `null` | `null` | Maximum policy execution count. **`0` means zero executions are permitted.** Only `null` or an absent field means "no limit". |
 | `blocked_tools` | `list[string]` | `[]` | Glob patterns for tools that are unconditionally blocked (e.g. `destructive_*`). |
 | `allowed_domains` | `list[string]` | `[]` | Glob patterns for permitted domains on network tools (`browser`, `http`, `fetch`, `request`). If specified, any non-matching domain is blocked. Hosts are matched case-insensitively, and a resource that cannot be reduced to a host (`metadata.internal.corp`, `//metadata.internal.corp`, `HTTPS://METADATA.INTERNAL.CORP`, `https://user@metadata.internal.corp/`) is matched against these patterns too — a domain policy fails closed rather than skipping the check. |
 | `blocked_domains` | `list[string]` | `[]` | Glob patterns for domains that are explicitly blocked. Matched case-insensitively against the host of every network-tool resource, however the URL is spelled. |

@@ -504,14 +504,26 @@ class Guard:
             current_exec = self.execution_count
 
         # Global limits
-        if self.policy.max_tool_calls and current_count > self.policy.max_tool_calls:
+        #
+        # The `is not None` test is the whole point (issue #174). A truthiness
+        # test would treat an explicit `0` as "no limit configured", so a
+        # policy asking for a zero budget enforced no limit at all -- a
+        # fail-open hole in a deny-oriented guard. `None`/absent still means no
+        # limit; an explicit integer is always enforced, `0` included.
+        if (
+            self.policy.max_tool_calls is not None
+            and current_count > self.policy.max_tool_calls
+        ):
             return Verdict(
                 allowed=False,
                 rule=None,
                 reason=f"max_tool_calls exceeded ({self.policy.max_tool_calls})",
                 risk=RiskLevel.HIGH,
             )
-        if self.policy.max_executions and current_exec > self.policy.max_executions:
+        if (
+            self.policy.max_executions is not None
+            and current_exec > self.policy.max_executions
+        ):
             return Verdict(
                 allowed=False,
                 rule=None,
