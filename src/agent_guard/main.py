@@ -150,8 +150,19 @@ def audit(policy_file: str, fmt: str):
     default=True,
     help="Strict=deny by default, Permissive=allow by default",
 )
-def init_policy(name: str, output: str, strict: bool):
+@click.option("--force", is_flag=True, help="Overwrite an existing policy file")
+def init_policy(name: str, output: str, strict: bool, force: bool):
     """Generate a starter policy file."""
+    target = Path(output)
+    # The template is a whole file, not a section, so writing it over an
+    # existing policy destroys every key the user added -- max_tool_calls, a
+    # hand-written rule, a description. Refuse unless --force says so.
+    if target.exists() and not force:
+        click.echo(
+            f"Error: {target} already exists — use --force to overwrite it",
+            err=True,
+        )
+        raise SystemExit(1)
     default_action = "deny" if strict else "allow"
     template = f"""# Agent Guard policy: {name}
 # Auto-generated starter template
@@ -199,8 +210,8 @@ rules:
     resource: "rm -rf *"
     description: "Prevent destructive removal"
 """
-    Path(output).write_text(template)
-    click.echo(f"Policy template written to {output}")
+    target.write_text(template, encoding="utf-8")
+    click.echo(f"Policy template written to {target}")
 
 
 if __name__ == "__main__":
