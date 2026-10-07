@@ -543,7 +543,7 @@ class Guard:
 
         # SECURITY: Sanitize shell resource to prevent command injection
         if call.tool in ("shell", "bash"):
-            dangerous = [";", "|", "&", "$", "`", ">", "<", "\n", "\r", "&&", "||"]
+            dangerous = [";", "|", "&", "$", "`", ">", "<", "\n", "\r", "&&", "||", "(", ")"]
             for ch in dangerous:
                 if ch in (call.resource or ""):
                     return Verdict(

@@ -111,6 +111,23 @@ def test_shell_injection_dollar():
     assert not verdict.allowed
 
 
+def test_shell_injection_parens():
+    policy = Policy(name="t", description="t", default_action=Action.ALLOW, rules=[])
+    guard = Guard(policy)
+    call = ToolCall(tool="shell", resource="ls (rm -rf /)")
+    verdict = guard.check(call)
+    assert not verdict.allowed
+    assert verdict.risk == RiskLevel.CRITICAL
+
+
+def test_shell_injection_parens_subshell():
+    policy = Policy(name="t", description="t", default_action=Action.ALLOW, rules=[])
+    guard = Guard(policy)
+    call = ToolCall(tool="shell", resource="(cat /etc/passwd)")
+    verdict = guard.check(call)
+    assert not verdict.allowed
+
+
 def test_shell_safe_command():
     policy = Policy(name="t", description="t", default_action=Action.ALLOW, rules=[])
     guard = Guard(policy)
